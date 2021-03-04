@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="js/jquery-3.3.1.min.js"></script>
+    <script src="js/jquery-ui.min.js"></script>   
+    <script src="js/common.js"></script> 
+    <script src="js/color-hash.js"></script>
+    <script src="js/fabric.min.js"></script>
+
+    <title>CCTV Segmentation(rescale O)</title>
+	<style>
+        .flex { display: flex; display: -webkit-flex; display: -ms-flexbox;-webkit-align-items: center;  width: 100%;    align-items: center; }
+        .flex.sb { justify-content: space-between; }
+        .flex.sa { justify-content: space-around; }
+        .flex.fs { align-items: flex-start; }
+        .wrapper { width: 1024px; margin: 0 auto; }
+
+        canvas { border: solid 1px black; display: block; }
+        .coord { margin-top: 30px; }
+        .controlbar { width: 300px; height: 30px; margin: 3px 0; }
+        button { cursor: pointer; }
+        .btn_zoom, .btn_poly { padding: 3px 8px; border: 1px solid #555; border-radius: 3px; margin-right: 3px; }
+        h1 { width: 1024px; margin: 0 auto; }
+        .tooltip { position: absolute; z-index: 1; background: rgb(119,128,0); height: 30px; width: 120px; padding: 8px; font-size: 10px; color: #fff; visibility: hidden; }
+    </style>    
+</head>
+<body>
+    <div id="cctvBox">
+        <h1>CCTV Segmentation</h1>
+        <div class="wrapper">
+            <input type='file' id='image_file' />
+            <!-- <input type='button' id="load" value='Load' onclick="cctvBox.loadImage();"/> -->
+            <button id="load" value='Load'>Load</button>
+            <button id="home" value='home'>Home</button>
+            <div class="container">
+                <canvas id="canvas"></canvas>
+                <div class="controlbar flex">
+                    <button class="btn_zoom in">+</button>
+                    <button class="btn_zoom out">-</button>
+                    <button class="btn_zoom reset">RESET</button>
+                    <button class="btn_poly on">Drawing</button>
+                </div>
+            </div>
+
+            <!-- <input type='button' id="crop" value='Crop' onclick="cctvBox.cropImage();"/> -->
+            <!-- <button id="crop" value="crop">Crop</button> -->
+            <!-- <canvas id="crop_img"></canvas>  -->
+            <div class="coord">
+                <div class="orig"><b>Original Image Size: </b><br><span></span></div><br>
+                <!-- <div class="orig_coord"><b>Original Image Coordinate: </b><br><span></span></div><br> -->
+                <div class="crop"><b>Crop Image Coordinate(rescale X): </b><br><span></span></div><br>
+                <div class="poly"><b>Poly Coordinate: </b><br><span></span></div>
+            </div>
+            <span ref="tooltip" class="tooltip">Tooltip</span>            
+        </div>
+    </div>
+ 
+    
+	<script type='text/javascript'>
+        $(function(){
+            var that = cctvBox;
+
+            that.data.canvas = new fabric.Canvas("canvas",{
+                width: 800,
+                height: 600,
+                selection : false,
+                uniScaleTransform : true,
+            });
+
+            cctvBox.init();
+        });
+
+        var cctvBox = {
+            pt: $("#cctvBox"),
+            data : {
+                clsImage : null,
+                iCropLeft : null,
+                iCropTop : null,
+                iCropWidth : null,
+                iCropHeight : null,
+                iImageWidth : null,
+                iImageHeight : null,
+                
+                // initial canvas and canvas var
+                canvas : null,
+                canvasObj : {
+                    origX : 0, 
+                    origY : 0, 
+                    isDown : false, // default : false
+                    freeDrawing : false, // default : false
+                    currDataNum : 1,
+                    datasetId : null,
+// 					isPolyActive : true,
+                    state : false,
+                    isModified : 0,
+                    isDrawing : false,
+                },
+                
+                scaleFactor : {origWidth:0, origHeight:0, ratio:1, minBboxSize:0},
+                meta : {},
+                colorHash : null,
+            },
+
+            init : function(){
+                var that = cctvBox;
+                that.data.colorHash = new ColorHash();
+                that.evtOnceInit();
+                that.listener();
+            },
+
+            evtOnceInit : function(){
+                this.downEvt();
+                this.moveEvt();
+                this.upEvt();
+                this.wheelEvt();
+                this.objMovingEvt();
+                //this.overEvt();
+                //this.outEvt();
+            //    this.objModifiedEvt();
+            //    this.objScalingEvt();
+            },
+
+            downEvt : function(){
+                var that = cctvBox;
+                
+                var canvas = that.data.canvas;
+                
+                that.data.canvas.on('mouse:down',function(o){
+                    var meta = that.data.meta;
+                    var uuid = that.data.uuid;
+
+                    that.data.canvasObj.isDown = true;
+                    console.log(o.target);
+                    
+                    if($("input#image_file").val() != "" && that.data.canvas.imgInfo != undefined){
+                        //that.data.canvasObj.isDown = true;
+                        that.data.canvasObj.freeDrawing = true;
+                    }
+
+
+
+                    if(that.data.canvasObj.freeDrawing == true && uuid !=""){
+                        // drawing 모드일 때에만 동작 (<=> panning)
+                        if(that.data.canvasObj.isDrawing){     
+                            var pointer = canvas.getPointer(o.e);
+                        
+                            that.data.canvasObj.origX = pointer.x;
+                            that.data.canvasObj.origY = pointer.y;
+                            
+                            if(that.data.canvasObj.isDown){
+                                //var temp = {
+                                //    uuid : uuid,
+                                //    left: that.data.canvasObj.origX,
+                                //  top: that.data.canvasObj.origY,
+                                //width: pointer.x - that.data.canvasObj.origX,
+                                //   height : pointer.y - that.data.canvasObj.origY,
+                                //};
+                                var temp = {
+                                    x : that.data.canvasObj.origX,
+                                    y : that.data.canvasObj.origY,
+                                }
+                                
+                                var canv = canvas.getObjects();
+                                for(var i=0; i<canv.length; i++){
+                                    if(o.target && o.target['uuid'] == canv[i]['uuid'] && canv[i]["uuid"] == uuid && o.target['index'] == canv[i]['index']){
+                                        that.data.canvasObj.freeDrawing = false;
+                                        that.addLine(uuid);
+                                        that.generatePoly(uuid);
+                                        for(var j=0; j<canv.length; j++){
+                                            if(canv[j].type == "point" && canv[j].fill == "white"){
+                                                canv[j].fill = "blue";
+                                            }
+                                        }
+                                        return;
+                                    }
+                                }
+    
+                                that.saveMetaData(uuid,temp);
+                                that.createPoint(uuid,temp);
+        
+                                if(meta[uuid] && meta[uuid]['polyData'].length > 1){
+                                    that.addLine(uuid);
+                                    that.generatePoly(uuid);
+                                }
+    
+                            }
+                        }
+                    }
+
+                    
+                });                    
+            },
+
+            moveEvt : function(){
+                var that = cctvBox;
+                var data = that.data;
+                var canvas = that.data.canvas;
+                
+                canvas.on('mouse:move', function(evt) {
+                    var tempPoly = canvas.getActiveObject();
+                    if(that.data.canvasObj.isDown){
+                    //    console.log(evt.e);
+                    }	
+                    if(data.canvasObj.isDown == true && data.canvasObj.freeDrawing == false){
+                        var objType = null;
+                        var target = null;
+                        var polygon = null;
+                        
+                        // 줌 인/아웃시 캔버스 이동
+                        if(evt.target == null && data.canvasObj.isDown == true && data.canvasObj.freeDrawing == false){
+                            var zoom = canvas.getZoom();
+
+                            
+                            if (this.viewportTransform[4] + evt.e.movementX >= 0) {
+                                return;
+                            } else if (this.viewportTransform[4] + evt.e.movementX < canvas.getWidth() - canvas.getWidth() * zoom) {
+                                return;
+                            } 
+                            if (this.viewportTransform[5] + evt.e.movementY >= 0) {
+                                return;
+                            } else if (this.viewportTransform[5] + evt.e.movementY < canvas.getHeight() - canvas.getHeight() * zoom) {
+                                return;
+                            }	
+                            const delta = new fabric.Point(evt.e.movementX, evt.e.movementY);
+                            canvas.relativePan(delta);
+                        }
+                        
+                        // segmentation point 수정
+                        if(evt.target){
+                            objType = evt.target.type;
+                            target = evt.target;
+                            canvas.getObjects().forEach(function(canv,index){
+                                if(canv['type'] == 'polygon' && canv['uuid'] == target['uuid']){
+                                    polygon = canv;
+                                }
+                            });
+                            polygon.points[target.index] = {x: target.getCenterPoint().x, y: target.getCenterPoint().y}
+                        }
+                    } else if(data.canvasObj.isDown == true && evt.target == null){
+                        var zoom = canvas.getZoom();
+                        var maxWidth = 800;
+                        var maxHeight = 600;
+
+                        if(this.viewportTransform[4] + evt.e.movementX >= 0){
+                            return;
+                        } else if(this.viewportTransform[4] + evt.e.movementX < canvas.getWidth() - canvas.getWidth() * zoom){
+                            return;
+                        }
+                        if(this.viewportTransform[5] + evt.e.movementY >= 0){
+                            return;
+                        } else if(this.viewportTransform[5] + evt.e.movemetnY < canvas.getHeight() - canvas.getHeight() * zoom){
+                            return;
+                        }
+                        var delta = new fabric.Point(evt.e.movementX, evt.e.movementY);
+                        canvas.relativePan(delta);
+                        
+                        // 확대 및 캔버스 드래그 이동 시 하단으로만 무한 여백으로의 이동이 가능했던 문제
+                        var canvasViewPort = canvas.viewportTransform;
+
+                        var imageHeight = canvas.height * canvasViewPort[0];
+                        var imageWidth = canvas.width * canvasViewPort[0];
+
+                        var bottomEndPoint = canvas.height * (canvasViewPort[0] - 1);
+                        if(canvasViewPort[5] >= 0 || -bottomEndPoint > canvasViewPort[5]){
+                            canvasViewPort[5] = (canvasViewPort[5] >= 0) ? 0 : -bottomEndPoint;
+                        }
+
+                        var rightEndPoint = canvas.width * (canvasViewPort[0] - 1);
+                        if(canvasViewPort[4] >= 0 || -rightEndPoint > canvasViewPort[4]){
+                            canvasViewPort[4] = (canvasViewPort[4] >= 0) ? 0 : -rightEndPoint;
+                        }
+                    }
+
+                });                    
+            },
+
+            upEvt : function(){
+                var that = cctvBox;
+                var canvas = that.data.canvas;
+                
+                canvas.on('mouse:up', function(o) {
+                        var uuid = that.data.uuid;  
+                    
+                        that.data.canvasObj.isDown = false;
+                        //that.data.canvasObj.freeDrawing = false;
+                        
+                        var canv = that.data.canvas.getObjects();
+                        var target;
+                        for(var i=0; i<canv.length; i++){
+                            if(canv[i]['uuid'] == uuid && canv[i]['type'] == 'polygon'){
+                                target = canv[i];
+                            }
+                        }
+                        if(target){
+                            if(that.data.canvasObj.isDrawing){
+                                that.addLine(uuid);
+                                that.generatePoly(uuid);
+                            } else {
+                                that.generatePoly(uuid, false);
+                            }
+
+                        }
+                        
+                        var newPoly = that.resetPolyPosition(that.data.canvas.getObjects(),uuid);
+                        
+                        //that.renderCropImg(newPoly, uuid);
+                        // polygon 영역 박스 좌표 정보 출력
+                        if(newPoly != undefined){
+                            var text = "";
+                            text += "x: "+newPoly.left+" ";
+                            text += " / ";
+                            text += "y: "+newPoly.top+" ";
+                            text += " / ";
+                            text += "width: "+newPoly.width+" ";
+                            text += " / ";
+                            text += "height: "+newPoly.height+" ";
+                            that.pt.find(".coord .crop span").html(text);
+                            
+                            // polygon의 각 point 별 좌표 정보 출력
+                            var sf = that.data.scaleFactor.ratio;
+                            var polyObj = that.data.canvas.getObjects();
+                            var polyText = "";
+                            if(that.data.canvasObj.isDrawing){
+                                console.log(polyObj);
+                            }
+                            
+                            for(var i=0; i<polyObj.length; i++){
+                                if(polyObj[i].type == "point"){
+                                    polyText += "<b>"+i+"</b> left: "+polyObj[i].left / sf+" / ";
+                                    polyText += "top: "+polyObj[i].top / sf+"<br>";
+                                }
+                            }
+                            that.pt.find(".coord .poly span").html(polyText);
+                            /*var ratio = that.data.scaleFactor.ratio;
+                            var orig_text = "";
+                            orig_text += "x: "+ newPoly.left / ratio +" ";
+                            orig_text += " / ";
+                            orig_text += "y: "+ newPoly.top / ratio +" ";
+                            orig_text += " / ";
+                            orig_text += "width: "+ newPoly.width / ratio +" ";
+                            orig_text += " / ";
+                            orig_text += "height: "+ newPoly.height / ratio+" ";
+                            that.pt.find(".coord .orig_coord span").html(orig_text);    */
+                        }
+                     
+                });                    
+            },     
+
+            wheelEvt : function(){
+                var that = cctvBox;
+                var canvas = that.data.canvas;
+                canvas.on("mouse:wheel",function(evt){
+// 							console.log("mouse wheel!",evt);
+                    //클릭 이벤트가 없을경우만 실행
+                    if(that.data.canvasObj.isDown == false){
+                        const delta = evt.e.deltaY;
+                        const pointer = canvas.getPointer(evt.e);
+                        let zoom = canvas.getZoom();
+                        zoom = zoom + delta/200;
+                        
+                        // jh.sa : zoom 확대 시에 rectgon point 크기가 커지던 문제 수정
+                        let allPoints = canvas.getObjects("point");
+                        $.each(allPoints, function(i, obj){
+                            if (zoom > 10) zoom = 10;
+                            if (zoom < 0.8) zoom = 0.8;							
+                            obj.set({
+                                scaleX: 1/zoom,
+                                scaleY: 1/zoom
+                            });
+                        });
+                        
+                        //최대크기 : 10(10이상시 크기변화가 크지않음), 최소크기 : 0.8
+                        if (zoom > 10) zoom = 10;
+                        if (zoom < 0.8) zoom = 0.8;
+                        canvas.zoomToPoint({ x: evt.e.offsetX, y: evt.e.offsetY }, zoom);
+                        evt.e.preventDefault();
+                        evt.e.stopPropagation();
+                        
+                        //줌이 1보다 작을때 컨버스를 중앙에
+                        if (zoom < 1) {
+                            this.viewportTransform[4] = (this.getWidth() - this.getWidth() * zoom) / 2;
+                            this.viewportTransform[5] = (this.getHeight() - this.getHeight() * zoom) / 2;
+                        } else {
+                            if (this.viewportTransform[4] >= 0) {
+                                this.viewportTransform[4] = 0;
+                            } else if (this.viewportTransform[4] < canvas.getWidth() - canvas.getWidth() * zoom) {
+                                this.viewportTransform[4] = canvas.getWidth() - canvas.getWidth() * zoom;
+                            }
+                            if (this.viewportTransform[5] >= 0) {
+                                this.viewportTransform[5] = 0;
+                            } else if (this.viewportTransform[5] < canvas.getHeight() - canvas.getHeight() * zoom) {
+                                this.viewportTransform[5] = canvas.getHeight() - canvas.getHeight() * zoom;
+                            }
+                        }
+                        
+                        this.renderAll();
+                    }
+                    
+                });                    
+            },      
+
+            overEvt : function(){
+                var that = cctvBox;
+                var canvas = that.data.canvas;
+                var tooltip = that.pt.find(".tooltip");
+                canvas.on("mouse:over", function(e){
+                    console.log("Everyday I'm hovering :)");
+                    if(e.target && e.target.type == "polygon"){
+                        tooltip.innerHTML = "tooltipabcdefgh";
+                        tooltip.css("visibility", "visible");
+                        tooltip.css("top", e.e.offsetY+"px");
+                        tooltip.css("left", e.e.offsetX+"px");
+                    }
+                });
+            },
+
+            outEvt : function(){
+                var that = cctvBox;
+                var canvas = that.data.canvas;
+                var tooltip = that.pt.find(".tooltip");
+                canvas.on("mouse:out", function(e){
+                    console.log("Mouse out :)");
+                    tooltip.css("visibility", "hidden");
+                });
+            },
+            
+            objMovingEvt : function(){
+                var that = cctvBox;
+                var canvas = that.data.canvas;
+                that.data.canvas.on("object:moving",function(evt){
+                    var tempPoly = that.data.canvas.getActiveObject();
+                    tempPoly = {
+                            left : evt.target.left,
+                            top : evt.target.top,
+                            width : evt.target.width,
+                            height : evt.target.height,
+                    }
+                    
+                    /*if(( tempPoly.left + tempPoly.width ) > canvas.getWidth() ){
+                        tempPoly.left = canvas.getWidth() - tempPoly.width;
+                    }
+                    if(( tempPoly.top + tempPoly.height ) > canvas.getHeight() ){
+                        tempPoly.top = canvas.getHeight() - tempPoly.height;
+                    }*/
+                    if(( tempPoly.left + tempPoly.width ) > canvas.getWidth() ){
+                        tempPoly.left = canvas.getWidth();
+                    }
+                    if(( tempPoly.top + tempPoly.height ) > canvas.getHeight() ){
+                        tempPoly.top = canvas.getHeight();
+                    }
+                    if(tempPoly.width > canvas.getWidth()){
+                        tempPoly.width = canvas.getWidth();
+                    }
+                    if(tempPoly.height > canvas.getHeight()){
+                        tempPoly.height = canvas.getHeight();
+                    }
+                    if(tempPoly.left < 0){
+                        tempPoly.left = 0;
+                    }
+                    if(tempPoly.top < 0){
+                        tempPoly.top = 0;
+                    }
+                    evt.target.left = tempPoly.left;
+                    evt.target.top = tempPoly.top;
+                });                    
+            },
+
+            // Zoom In
+            zoomIn : function() {
+                var that = cctvBox;
+                var canvas = that.data.canvas;
+                var scaleFactor = that.data.scaleFactor.ratio;
+                var zoomMax = 10;
+                console.log("zoomIN");
+                if(canvas.getZoom().toFixed(5) > zoomMax){
+                    console.log("zoomIn: Error: cannot zoom-in anymore");
+                    return;
+                }
+
+                canvas.setZoom(canvas.getZoom() * 1.1);
+                var zoom = canvas.getZoom();
+                canvas.viewportTransform[4] = (canvas.getWidth() - canvas.getWidth() * zoom) / 2;
+                canvas.viewportTransform[5] = (canvas.getHeight() - canvas.getHeight() * zoom) / 2;                      
+                //canvas.setHeight(canvas.getHeight() * scaleFactor);
+                //canvas.setWidth(canvas.getWidth() * scaleFactor);
+                canvas.renderAll();
+            },
+
+            // Zoom Out
+            zoomOut : function() {
+                var that = cctvBox;
+                var canvas = that.data.canvas;
+                var scaleFactor = that.data.scaleFactor.ratio;
+
+                if( canvas.getZoom().toFixed(5) <= 0.8 ){
+                    console.log("zoomOut: Error: cannot zoom-out anymore");
+                    return;
+                }
+
+                canvas.setZoom(canvas.getZoom() / 1.1);
+                var zoom = canvas.getZoom();
+                canvas.viewportTransform[4] = (canvas.getWidth() - canvas.getWidth() * zoom) / 2;
+                canvas.viewportTransform[5] = (canvas.getHeight() - canvas.getHeight() * zoom) / 2;                  
+                //canvas.setHeight(canvas.getHeight() / scaleFactor);
+                //canvas.setWidth(canvas.getWidth() / scaleFactor);
+                canvas.renderAll();
+
+            },
+
+            // Reset Zoom
+            resetZoom : function() {
+                var that = cctvBox;
+                var canvas = that.data.canvas;
+
+                //canvas.setHeight(canvas.getHeight() /canvas.getZoom() );
+                //canvas.setWidth(canvas.getWidth() / canvas.getZoom() );
+                canvas.setZoom(0.8);
+                
+                var zoom = canvas.getZoom();
+                if(zoom < 1){
+                    canvas.viewportTransform[4] = (canvas.getWidth() - canvas.getWidth() * zoom) / 2;
+                    canvas.viewportTransform[5] = (canvas.getHeight() - canvas.getHeight() * zoom) / 2;
+                }
+                canvas.renderAll();
+
+                that.getFabricCanvases().forEach(function(item){
+                    item.css('left', 0);
+                    item.css('top', 0);
+                });
+
+            },           
+
+            listener : function(){
+                var that = cctvBox;
+
+                that.pt.find("#load").off("click").on("click", function(e){
+                    that.clearAllData();
+                    that.loadImage();
+                });
+                that.pt.find("#home").off("click").on("click",function(e){
+                    location.href = "test_main.html";
+                });
+
+                that.pt.find("#crop").off("click").on("click", function(e){
+                    that.cropImage();
+                });
+                
+                // canvas zoom controller button
+                that.pt.find(".btn_zoom").off("click").on("click", function(e){
+                    if($(this).hasClass("in")){
+                        that.zoomIn();
+                    } else if($(this).hasClass("out")){
+                        that.zoomOut();
+                    } else if($(this).hasClass("reset")){
+                        that.resetZoom();
+                    }
+                });
+                
+                // polygon drawing & panning mode toggle button
+                that.pt.find(".btn_poly").off("click").on("click", function(e){
+                    if($(this).hasClass("on")){
+                        that.data.canvasObj.isDrawing = false;
+                        that.zoomCanvasSelection(false);
+                        $(this).removeClass("on");
+                        $(this).html("Panning")
+                    } else if(!$(this).hasClass("on")){
+                        that.data.canvasObj.isDrawing = true;
+                        that.zoomCanvasSelection(true);
+                        $(this).addClass("on");
+                        $(this).html("Drawing");
+                    }
+                });
+                
+            },     
+
+            zoomCanvasSelection : function(isSelectable){
+                var that = cctvBox;
+                var canvas = that.data.canvas;
+                canvas.selection = isSelectable;
+                canvas.forEachObject(function(o){
+                    o.selectable = isSelectable;
+                    o.evented = isSelectable;
+                });
+                canvas.renderAll();
+            },
+            
+            createPoint : function(uuid,pointObj,index) { //create new point
+                var that = cctvBox;
+                var meta = that.data.meta;
+// 						var tmpObj = that.getPointObject(uuid,pointObj,meta[uuid]['polyData'].length-1);
+                // jh.sa 201021 수정
+                var tmpObj;
+                if(index == undefined || index == null){
+                    tmpObj = that.getPointObject(uuid,pointObj,meta[uuid]['polyData'].length-1);
+                } else {
+                    tmpObj = that.getPointObject(uuid,pointObj,index);
+                }
+                var tempPoint = new fabric.Circle( tmpObj );
+                
+                if(that.data.meta[uuid]['polyData'].length == 1){
+                    tempPoint.set({
+                        fill:'white'
+                    });
+                }
+                
+                that.data.canvas.add(tempPoint);
+                that.data.canvas.setActiveObject(tempPoint);
+                that.data.canvas.renderAll();
+            },
+            
+            initPolyFromMeta : function(uuid) { // from Server Data, initiate meta poly data
+                var that = cctvBox;
+                var meta = that.data.meta;
+                
+                var polyObj = this.getPointObject(meta[uuid]);
+                var tempPoly = new fabric.Circle( polyObj );
+                
+                that.data.canvas.add(tempPoly);
+                
+                
+            }, //init Poly data end
+            
+            addLine : function(uuid){ //create new line
+                var that = cctvBox;
+                var tmpObj = that.getLineObject(uuid);
+                var points = that.data.meta[uuid]['polyData'];
+                
+                var tempLine = new fabric.Line(points,tmpObj);
+                that.data.canvas.add(tempLine);
+                that.data.canvas.setActiveObject(tempLine);
+                that.data.canvas.renderAll();
+            },
+            generatePoly : function(uuid, isCompleted){ //create new poly
+                var that = cctvBox;
+                var canvas = that.data.canvas;
+                var canvasObj = that.data.canvasObj;
+                var tmpObj;
+                ///////201031
+                if(isCompleted == false){
+                    tmpObj = that.getPolyObject(uuid,false);
+                } else {
+                    tmpObj = that.getPolyObject(uuid,canvasObj.freeDrawing);
+                }
+// 						var tmpObj = that.getPolyObject(uuid,canvasObj.freeDrawing);
+                var points = that.data.meta[uuid]['polyData'];
+                var tempPoly = new fabric.Polygon(points,tmpObj);
+                
+                $.each(canvas.getObjects(),function(index,obj){
+                    if(typeof obj.uuid != "undefined" && obj.uuid == uuid && obj.type != "point"){
+                        canvas.remove(obj);
+                    }
+                });
+                
+// 						if(canvasObj.freeDrawing == false){
+                    
+// 							$.each(canvas.getObjects(),function(index,obj){
+// 								if(typeof obj.uuid != "undefined" && obj.uuid == uuid && obj.type != "point"){
+// 									canvas.remove(obj);
+// 								}
+// 							});
+// 						}
+                    
+                canvas.add(tempPoly);
+                canvas.sendToBack(tempPoly);
+// 						canvas.setActiveObject(tempPoly);
+                canvas.renderAll();
+                that.data.meta[uuid]['polyData']['box'] = {
+                        left:tempPoly.left,
+                        top:tempPoly.top,
+                        width:tempPoly.width,
+                        height:tempPoly.height,
+                }						
+            },
+            
+            // get CIRCLE object for initialisation
+            getPointObject : function(uuid,points,index) {
+                var that = cctvBox;
+                var object = {};
+                object = {
+                        type : "point",
+                        radius: 3,
+                        fill: 'blue',
+                        left: points.x,
+                        top: points.y,
+                        originX: 'center',
+                        originY: 'center',
+                        // hasBorders: false,
+                        objectCaching: false,
+                        hasControls: false,
+                        selectable: true,
+                        index: index,
+                        uuid : uuid,
+                }
+                
+                return object;	
+            },
+            // get LINE object for initialisation
+            getLineObject : function(uuid){
+                var that = cctvBox;
+                var object = {
+                    strokeWidth: 2,
+                    fill: '#999999',
+                    stroke: '#999999',
+                    type:'line',
+                    originX:'center',
+                    originY:'center',
+                    selectable: false,
+                    hasBorders: false,
+                    hasControls: false,
+                    evented: false,
+                    objectCaching:false,
+                    uuid:uuid,
+                };
+                return object;
+            },
+            
+            // get POLYGON object for initialisation
+            getPolyObject : function(uuid,freeDrawing){
+                var that = cctvBox;
+                var meta = that.data.meta;
+                var object = {};
+                if(freeDrawing == true){
+                    object = {
+                        stroke:'#333333',
+                        strokeWidth:1,
+                        type:'polygon',
+                        fill: '#cccccc',
+                        opacity: 0.3,
+                        selectable: false,
+                        hasBorders: false,
+                        hasControls: false,
+                        evented: false,
+                        objectCaching:false,
+                        uuid : uuid,
+                    };	
+                }else{
+                    object = {
+                        stroke:'#333333',
+                        strokeWidth:0.5,
+                        type:'polygon',
+                        fill: 'rgb(0,0,255,0.2)',
+                        //fill: 'rgb('+that.data.colorHash.rgb(uuid)+',0.5)',
+                        selectable: false,
+                        hasBorders: true,
+                        hasControls: false,
+                        objectCaching:false,
+                        lockMovementX: true,
+                        lockMovementY: true,
+                        lockUniScaling : true,
+                        uuid : uuid,
+                        evented: false,
+                    }
+                }
+                return object;
+            },
+            
+            resetPolyPosition : function(canvObjs,uuid){
+                var that = cctvBox;
+                var scaledRatio = that.data.scaleFactor.ratio;
+                var newPoly = null;
+                
+                for(var i=0; i<canvObjs.length; i++){
+                    if(canvObjs[i]['uuid'] == uuid && canvObjs[i]['type'] == "polygon"){
+                        newPoly = canvObjs[i];
+                    }
+                }
+                
+                if(newPoly == null){
+                    return;
+                }
+// 						var tempPoly = {
+// 							left : newPoly.aCoords.tl.x/scaledRatio,
+// 							top : newPoly.aCoords.tl.y/scaledRatio,
+// 							width : (newPoly.aCoords.br.x - newPoly.aCoords.tl.x)/scaledRatio,
+// 							height : (newPoly.aCoords.br.y - newPoly.aCoords.tl.y)/scaledRatio,
+// 						};
+                var tempPoly = {
+                    left : newPoly.left/scaledRatio,
+                    top : newPoly.top/scaledRatio,
+                    width : newPoly.width/scaledRatio,
+                    height : newPoly.height/scaledRatio,
+                }
+                
+                return tempPoly;
+                
+            },            
+
+
+            initRect : function(obj,uuid){
+                var that = cctvBox;
+                var tempRect = {};
+                tempRect = new fabric.Rect( obj );
+
+                that.data.canvas.add(tempRect);
+                that.data.canvas.setActiveObject(tempRect);
+                that.data.canvas.renderAll();
+            },
+
+            getRectObject : function(rectData, uuid){
+                var that = cctvBox;
+                var object = {};
+
+                object = {
+                    left : rectData.left,
+                    top : rectData.top,
+                    width : rectData.width,
+                    height : rectData.height,
+                    uuid : uuid,
+                    stroke : "blue",
+                    //fill : "transparent",
+                    fill : "rgba(0,0,255,0.2)",
+                    type : 'rect',
+                    strokeWidth : 2,
+                    strokeWidthUnscaled:2,
+                    lockRotation : true,
+                    noScaleCache : false,
+                    lockUniScaling : false,
+                    lockScalingFlip : true,
+                    transparentCorners : false,
+                    strokeUniform : true,                                                
+                    cornerColor : "blue",
+                    cornerSize : 10,                        
+                }
+
+                return object;
+            },
+
+            initMetaData : function(uuid){
+                var that = cctvBox;
+
+                that.data.meta[uuid] = {
+                    id : uuid,
+                    polyData : [],
+                };
+            },
+
+            saveMetaData : function(uuid, newPoly){
+                var that = cctvBox;
+                var meta = that.data.meta;
+
+                var tempPoly = {
+                    x : newPoly.x,
+                    y : newPoly.y,
+                }
+
+                that.data.meta[uuid]['id'] = uuid;
+                that.data.meta[uuid]['polyData'].push(tempPoly);
+            },
+
+            loadImage : function(){
+                var that = cctvBox;
+                var canvas = that.data.canvas;
+                var clsImage = that.data.clsImage;
+                var tmpObj = {};
+                var uuid = that.generateUUID();
+                console.log("load");
+                if( typeof window.FileReader !== 'function' )
+                {
+                    alert("FileReader is not supported");
+                    return;
+                }
+    
+                var inputFile = document.getElementById('image_file');
+                var clsFileReader = new FileReader();
+                clsFileReader.onload = function(){
+                    that.data.clsImage = new Image();
+                    that.data.clsImage.onload = function(){
+                        //var canvas = document.getElementById("canvas");
+                        //canvas.width = clsImage.width;
+                        //canvas.height = clsImage.height;
+
+                        tempObj = {
+                            width : this.naturalWidth,
+                            height : this.naturalHeight,
+                        };
+
+                        that.rescaleTempImg(this);
+
+                        $.when(that.getScaleFactor(tempObj)).done(function(){
+                            canvas.setHeight(tempObj.height * that.data.scaleFactor.ratio);
+                            canvas.setBackgroundImage(that.data.clsImage.src,canvas.renderAll.bind(canvas),{
+                                scaleX : that.data.scaleFactor.ratio,
+                                scaleY : that.data.scaleFactor.ratio,
+                            });
+                        });
+
+                        var text = "";
+                        text += "width: "+this.naturalWidth+" ";
+                        text += " / ";
+                        text += "height: "+this.naturalHeight+" ";
+                        text += " / ";
+                        text += "scaleFactor: "+that.data.scaleFactor.ratio;
+
+                        that.pt.find(".coord .orig span").html(text);                            
+
+                        //canvas.setWidth(that.data.clsImage.width);
+                        //canvas.setHeight(that.data.clsImage.height);
+                        //canvas.calcOffset();
+                        //canvas.renderAll();
+                        //canvas.setBackgroundImage(that.data.clsImage.src,canvas.renderAll.bind(canvas),{
+                        //    scaleX : that.data.scaleFactor.ratio,
+                        //    scaleY : that.data.scaleFactor.ratio,
+                        //});
+                        canvas.imgInfo = that.data.clsImage;
+
+                        that.data.uuid = uuid;
+                        
+                        that.data.iCropLeft = 100;
+                        that.data.iCropTop = 100;
+                        that.data.iCropWidth = that.data.clsImage.width - 200;
+                        that.data.iCropHeight = that.data.clsImage.height - 200;
+                        that.data.iImageWidth = that.data.clsImage.width;
+                        that.data.iImageHeight = that.data.clsImage.height;
+                        
+                        //that.drawCropRect();
+                        //that.addCropMoveEvent();
+                    };
+    
+                    that.data.clsImage.src = clsFileReader.result;
+                };
+    
+                clsFileReader.readAsDataURL(inputFile.files[0]);
+                that.initMetaData(uuid);
+                that.data.canvasObj.isDrawing = true;
+            },
+
+            rescaleTempImg : function(img, w, h){
+                var that = cctvBox;
+
+                var canvas_max_width = 800;
+                var canvas_max_height = 600;
+
+                if(w != null && h != null){
+                    canvas_max_width = w;
+                    canvas_max_height = h;
+                }
+
+                // canvas 최대 너비와 높이에 맞춰 원본 이미지 비율대로 이미지 크기 설정
+                let scaleFactor = 0;
+                if(canvas_max_height/canvas_max_width >= img.naturalHeight/img.naturalWidth  ){
+                    scaleFactor = canvas_max_width/img.naturalWidth;
+                } else {
+                    scaleFactor = canvas_max_height/img.naturalHeight;
+                }
+                
+                let imgInfo = that.data.scaleFactor;
+                imgInfo.scaleFactor = scaleFactor;
+                imgInfo.width = img.naturalWidth;
+                imgInfo.height = img.naturalHeight;					
+                
+                that.data.canvas.setWidth(img.naturalWidth*scaleFactor);
+                that.data.canvas.setHeight(img.naturalHeight*scaleFactor);
+                that.data.canvas.calcOffset();
+                that.data.canvas.renderAll();                    
+            },
+
+            rescale : function(rectData, isSave){
+                var that = cctvBox;
+                var scaleFactor = that.data.scaleFactor.ratio;
+                var tempData = [];
+
+                if(!isSave){
+                    tempData = {};
+                    tempData.top = rectData.top * scaleFactor;
+                    tempData.left = rectData.left * scaleFactor;
+                    tempData.width = rectData.width * scaleFactor;
+                    tempData.height = rectData.height * scaleFactor;
+                }else{
+                    tempData = {};
+                    tempData.top = rectData.top / scaleFactor;
+                    tempData.left = rectData.left / scaleFactor;
+                    tempData.width = rectData.width / scaleFactor;
+                    tempData.height = rectData.height / scaleFactor;
+                }
+                
+                return tempData;                    
+            },
+
+            // gap between real video size and web page
+            getScaleFactor : function(imgObj){
+                var that = cctvBox;
+                var minBboxSize = 30;
+// 						var imgObj = this.checkImageSize(dataAddr);
+                // 실제 비디오 크기 기준
+                // scaleFactor > 1 : 실제 비디오가 캔버스 크기보다 큼
+                // scaleFactor < 1 : 실제 비디오가 캔버스 크기보다 작음
+                that.data.scaleFactor.origWidth = imgObj['width'];
+                that.data.scaleFactor.origHeight = imgObj['height'];
+                that.data.scaleFactor.ratio = $("#canvas").width() / that.data.scaleFactor.origWidth;
+                that.data.scaleFactor.minBboxSize = that.data.scaleFactor.ratio * minBboxSize;
+                
+            }, // scalefactor end              
+            
+            getFabricCanvases : function(){
+                var that = cctvBox;
+                var fabricCanvasCollection;
+                if(!fabricCanvasCollection){
+                    fabricCanvasCollection = [];
+                    var fabricCanvas = $('.canvas-container canvas');
+                    fabricCanvas.each(function(index, item) {
+                        fabricCanvasCollection.push($(item));
+                    });
+                }
+
+                return fabricCanvasCollection;
+            },                
+            
+            cropImage : function(){
+                var that = cctvBox;
+
+                var canvas = document.getElementById("canvas");
+
+                img = new Image();
+                img.onload = function(){
+                    var canvas = document.getElementById("crop_img");
+                    canvas.width = that.data.iCropWidth;
+                    canvas.height = that.data.iCropHeight;
+                    var ctx = canvas.getContext("2d");
+                    ctx.drawImage( img, that.data.iCropLeft, that.data.iCropTop, that.data.iCropWidth, that.data.iCropHeight, 0, 0, that.data.iCropWidth, that.data.iCropHeight );
+                };
+    
+                img.src = canvas.toDataURL();
+            },
+
+            clearAllData : function(){
+                var that = cctvBox;
+                that.data.scaleFactor = { origWidth: 0, origHeight: 0, ratio: 1};
+                that.clearCanvas();
+                that.clearMeta();
+                that.clearPoly();
+            },
+
+            clearCanvas : function(){
+                var that = cctvBox;
+
+                that.data.canvas.clear();
+            },
+
+            clearMeta : function(){
+                var that = cctvBox;
+                that.data.meta = {};
+            },
+
+            clearRect : function(){
+                var that = cctvBox;
+
+                var canv = that.data.canvas.getObjects();
+                that.data.canvas.remove(canv);
+                that.data.rectObj = {};
+                
+            },
+
+            clearPoly(){
+                var that = cctvBox;
+                that.data.poly = {};
+            },	
+
+            generateUUID : function(){
+                var d = new Date().getTime();
+                if(window.performance && typeof window.performance.now === "function"){
+                    d += performance.now(); //use high-precision timer if available
+                }
+                var uuid = 'xxxxxxxx-xxxx-xxxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    var r = (d + Math.random()*16)%16 | 0;
+                    d = Math.floor(d/16);
+                    return (c=='x' ? r : (r&0x3|0x8)).toString(16);
+                });
+                return uuid;
+            },
+
+
+
+
+            renderCropImg : function(newPoly, uuid){
+                var that = cctvBox;
+                var scaleFactor = that.data.scaleFactor.ratio;
+
+                if(newPoly == undefined || newPoly == null){
+                    return;
+                }
+
+                var pt = that.pt.find("#crop_img");
+                var ctx = pt[0].getContext('2d');
+
+                var panelW = 640;
+                var panelH = 480;
+                
+                var newWidth = 0;
+                var newHeight = 0;
+                
+                var scaleW = newPoly.width/panelW;
+                var scaleH = newPoly.height/panelH;
+                
+                if(scaleW>=scaleH){
+                    newWidth = newPoly.width/scaleW;
+                    newHeight = newPoly.height/scaleW;
+                }else{
+                    newWidth = newPoly.width/scaleH;
+                    newHeight = newPoly.height/scaleH;
+                }
+                
+                pt[0].width = newWidth;
+                pt[0].height = newHeight;
+                
+                ctx.clearRect(0, 0, panelW, panelH);
+                ctx.drawImage(that.data.canvas.imgInfo,newPoly.left,newPoly.top,newPoly.width,newPoly.height,0,0,newWidth,newHeight);                   
+            },
+
+
+
+            
+
+
+            drawCropRect : function(){
+                var that = cctvBox;
+                
+                //var canvas = that.data.canvas;
+                var iCropLeft = that.data.iCropLeft;
+                var iCropTop = that.data.iCropTop;
+                var iCropWidth = that.data.iCropWidth;
+                var iCropHeight = that.data.iCropHeight;
+                var clsImage = that.data.clsImage;
+
+                var canvas = document.getElementById("canvas");
+                var ctx = canvas.getContext("2d");
+    
+                ctx.drawImage( clsImage, 0, 0 );
+    
+                ctx.strokeStyle = "#ff0000";
+                ctx.beginPath();
+                ctx.rect( iCropLeft, iCropTop, iCropWidth, iCropHeight );
+                ctx.stroke();
+            },
+
+            addCropMoveEvent : function(){
+                var that = cctvBox;
+
+                var canvas = document.getElementById("canvas");
+                var bDrag = false;
+                var iOldX, iOldY;
+                var iCropLeftOld, iCropTopOld;
+    
+                canvas.onmousedown = function(e){
+                    bDrag = true;
+                    iOldX = e.clientX;
+                    iOldY = e.clientY;
+                    iCropLeftOld = iCropLeft;
+                    iCropTopOld = iCropTop;
+                };
+    
+                canvas.onmousemove = function(e){
+                    if( bDrag == false ) return;
+    
+                    var iX = e.clientX - iOldX;
+                    var iY = e.clientY - iOldY;
+    
+                    iCropLeft = iCropLeftOld + iX;
+                    if( iCropLeft < 0 )
+                    {
+                        iCropLeft = 0;
+                    }
+                    else if( iCropLeft + iCropWidth > clsImage.width )
+                    {
+                        iCropLeft = clsImage.width - iCropWidth;
+                    }
+    
+                    iCropTop = iCropTopOld + iY;
+                    if( iCropTop < 0 )
+                    {
+                        iCropTop = 0;
+                    }
+                    else if( iCropTop + iCropHeight > clsImage.height )
+                    {
+                        iCropTop = clsImage.height - iCropHeight;
+                    }
+    
+                    that.drawCropRect();
+                };
+    
+                canvas.onmouseup = function(e){
+                    bDrag = false;
+                };
+            },
+
+
+        };
+
+		// var clsImage;
+		// var iCropLeft, iCropTop, iCropWidth, iCropHeight;
+
+		// 로컬 이미지 파일을 Canvas 에 로드한다.
+/*		function LoadImage() {
+			if( typeof window.FileReader !== 'function' )
+			{
+				alert("FileReader is not supported");
+				return;
+			}
+
+			var inputFile = document.getElementById('image_file');
+			var clsFileReader = new FileReader();
+			clsFileReader.onload = function(){
+				clsImage = new Image();
+				clsImage.onload = function(){
+                    var canvas = document.getElementById("canvas");
+					canvas.width = clsImage.width;
+					canvas.height = clsImage.height;
+
+					iCropLeft = 100;
+					iCropTop = 100;
+					iCropWidth = clsImage.width - 200;
+					iCropHeight = clsImage.height - 200;
+					iImageWidth = clsImage.width;
+					iImageHeight = clsImage.height;
+
+					DrawCropRect();
+					AddCropMoveEvent();
+				};
+
+				clsImage.src = clsFileReader.result;
+			};
+
+			clsFileReader.readAsDataURL(inputFile.files[0]);
+		}
+
+		// 로컬 이미지 파일과 Crop 을 위한 사각형 박스를 그려준다.
+		function DrawCropRect()
+		{
+			var canvas = document.getElementById("canvas");
+			var ctx = canvas.getContext("2d");
+
+			ctx.drawImage( clsImage, 0, 0 );
+
+			ctx.strokeStyle = "#ff0000";
+			ctx.beginPath();
+			ctx.rect( iCropLeft, iCropTop, iCropWidth, iCropHeight );
+			ctx.stroke();
+		}
+
+		// 이미지를 crop 하여서 하단 Canvas 에 그려준다.
+		function CropImage()
+		{
+			var canvas = document.getElementById("canvas");
+
+			img = new Image();
+			img.onload = function(){
+				var canvas = document.getElementById("canvas_crop");
+				canvas.width = iCropWidth;
+				canvas.height = iCropHeight;
+				var ctx = canvas.getContext("2d");
+				ctx.drawImage( img, iCropLeft, iCropTop, iCropWidth, iCropHeight, 0, 0, iCropWidth, iCropHeight );
+			};
+
+			img.src = canvas.toDataURL();
+		}
+
+		// 마우스 이동에 따른 Crop 사각 박스을 이동하기 위한 이벤트 핸들러를 등록한다.
+		function AddCropMoveEvent()
+		{
+			var canvas = document.getElementById("canvas");
+			var bDrag = false;
+			var iOldX, iOldY;
+			var iCropLeftOld, iCropTopOld;
+
+			canvas.onmousedown = function(e){
+				bDrag = true;
+				iOldX = e.clientX;
+				iOldY = e.clientY;
+				iCropLeftOld = iCropLeft;
+				iCropTopOld = iCropTop;
+			};
+
+			canvas.onmousemove = function(e){
+				if( bDrag == false ) return;
+
+				var iX = e.clientX - iOldX;
+				var iY = e.clientY - iOldY;
+
+				iCropLeft = iCropLeftOld + iX;
+				if( iCropLeft < 0 )
+				{
+					iCropLeft = 0;
+				}
+				else if( iCropLeft + iCropWidth > clsImage.width )
+				{
+					iCropLeft = clsImage.width - iCropWidth;
+				}
+
+				iCropTop = iCropTopOld + iY;
+				if( iCropTop < 0 )
+				{
+					iCropTop = 0;
+				}
+				else if( iCropTop + iCropHeight > clsImage.height )
+				{
+					iCropTop = clsImage.height - iCropHeight;
+				}
+
+				DrawCropRect();
+			};
+
+			canvas.onmouseup = function(e){
+				bDrag = false;
+			};
+		}
+*/
+    </script>   
+    
+  
+</body>
+</html>

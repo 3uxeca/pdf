@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:mvc="http://www.springframework.org/schema/mvc" xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:util="http://www.springframework.org/schema/util"
+	xsi:schemaLocation="http://www.springframework.org/schema/mvc http://www.springframework.org/schema/mvc/spring-mvc.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+		http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd
+		">
+
+    <!-- Uncomment and your base-package here:
+         <context:component-scan
+            base-package="org.springframework.samples.web"/>  -->
+
+	<context:component-scan base-package="com.xlabeller"/>  
+	<mvc:default-servlet-handler/>
+
+    <mvc:annotation-driven />
+
+		<mvc:interceptors>
+    	<mvc:interceptor>
+    		<mvc:mapping path="/**/*" />	
+			<mvc:exclude-mapping path="/auth/loginUser*" />	
+			<mvc:exclude-mapping path="/auth/insertUser*" />	
+				
+			<mvc:exclude-mapping path="/auth/getSession.json" />
+			<mvc:exclude-mapping path="/auth/auth*" />
+			
+			
+			<mvc:exclude-mapping path="/auth/**" />
+			
+			
+			<mvc:exclude-mapping path="/resources/**/" />	
+			<mvc:exclude-mapping path="/css/**/" />	
+			<mvc:exclude-mapping path="/js/**/" />	
+			<mvc:exclude-mapping path="/images/**/" />	
+			<mvc:exclude-mapping path="/files/**/" />	
+			
+			<mvc:exclude-mapping path="/include/**" />
+			
+			<mvc:exclude-mapping path="/header" />
+			<mvc:exclude-mapping path="/footer" />
+			<mvc:exclude-mapping path="/main" />
+			<mvc:exclude-mapping path="/login" />
+			<mvc:exclude-mapping path="/join" />
+			<mvc:exclude-mapping path="/joinResult" />
+			<mvc:exclude-mapping path="/findPassword" />
+			<mvc:exclude-mapping path="/users/reset" />
+			
+			<mvc:exclude-mapping path="/community" />
+			<mvc:exclude-mapping path="/notice/*" />
+			<mvc:exclude-mapping path="/faq/*" />
+			<mvc:exclude-mapping path="/ask/*" />
+			
+			<mvc:exclude-mapping path="/platform/*" />
+			<mvc:exclude-mapping path="/share/**" />
+			<mvc:exclude-mapping path="/datatool/**" />
+			
+			<mvc:exclude-mapping path="/data/**" />
+			<mvc:exclude-mapping path="/admin" />
+			<mvc:exclude-mapping path="/admin/header" />
+			<mvc:exclude-mapping path="/admin/footer" />
+			
+			<mvc:exclude-mapping path="/workspace" />
+			<mvc:exclude-mapping path="/labeller" />
+			
+			<mvc:exclude-mapping path="/test" />
+			<mvc:exclude-mapping path="/test/**" />
+			
+			<mvc:exclude-mapping path="/admin/**" />
+			
+			
+			<mvc:exclude-mapping path="/test2" />
+			<mvc:exclude-mapping path="/imageList/**" />
+			<mvc:exclude-mapping path="/annotation/**" />
+			<mvc:exclude-mapping path="/trainer/**" />
+			
+			<mvc:exclude-mapping path="/trainer/project/**" />
+			<mvc:exclude-mapping path="/trainer/task/**" />
+			<mvc:exclude-mapping path="/trainer2/**" />
+			<mvc:exclude-mapping path="/comparison/**" />
+			<mvc:exclude-mapping path="/graph/**" />
+			
+			<mvc:exclude-mapping path="/algorithm/**" />
+			
+			<mvc:exclude-mapping path="/info" />
+			<mvc:exclude-mapping path="/info/**" />
+			
+			<mvc:exclude-mapping path="/map/**" />
+			
+			<mvc:exclude-mapping path="/robots.txt" />	
+				
+			<bean class="com.xlabeller.auth.LoginCheckIntercepter"/>
+			<!-- controller 실행 전이나 후에 실행 될 intercepter 로직 class -->
+    	</mvc:interceptor>
+	    	
+	</mvc:interceptors>
+
+	<mvc:resources mapping="/resources/**" location="/resources/"/>
+ 	<mvc:resources mapping="/css/**" location="/resources/css/"/>
+ 	<mvc:resources mapping="/js/**" location="/resources/js/"/>
+ 	<mvc:resources mapping="/images/**" location="/resources/images/"/>
+ 	<mvc:resources mapping="/files/**" location="/resources/files/"/>
+ 	
+	<bean id="multipartResolver" class="org.springframework.web.multipart.commons.CommonsMultipartResolver" />
+	
+	<bean class="org.springframework.web.servlet.view.ContentNegotiatingViewResolver">
+		<property name="contentNegotiationManager">
+			<bean id="contentNegotiationManager" class="org.springframework.web.accept.ContentNegotiationManagerFactoryBean">
+				<property name="mediaTypes">
+					<map>
+			            <entry key="atom" value="application/atom+xml" />
+			            <entry key="html" value="text/html" />
+			            <entry key="jsp" value="text/html" />
+			            <entry key="json" value="application/json" />
+			        </map>
+			    </property>
+		    </bean>
+	    </property>
+	    
+	    <property name="viewResolvers">
+	        <list>
+	            <bean class="org.springframework.web.servlet.view.BeanNameViewResolver" >
+		            <property name="order">
+						<value>1</value>
+					</property>
+	            </bean>
+	            <bean class="org.springframework.web.servlet.view.InternalResourceViewResolver">
+	                <property name="prefix" value="/WEB-INF/view/" />
+	                <property name="suffix" value=".jsp" />
+	                <property name="cache" value="false" />
+	                <property name="order">
+						<value>0</value>
+					</property>
+	            </bean>
+	        </list>
+	    </property>
+	    <property name="defaultViews">
+	        <list>
+	            <bean class="org.springframework.web.servlet.view.json.MappingJackson2JsonView">
+	            </bean>
+	        </list>
+	    </property>
+	</bean>
+	
+<!-- 	<bean class="org.springframework.web.servlet.view.ContentNegotiatingViewResolver"> -->
+<!-- 		<property name="mediaTypes"> -->
+<!-- 			<map> -->
+<!-- 	            <entry key="atom" value="application/atom+xml" /> -->
+<!-- 	            <entry key="html" value="text/html" /> -->
+<!-- 	            <entry key="jsp" value="text/html" /> -->
+<!-- 	            <entry key="json" value="application/json" /> -->
+<!-- 	        </map> -->
+<!-- 	    </property> -->
+<!-- 	    <property name="viewResolvers"> -->
+<!-- 	        <list> -->
+<!-- 	            <bean class="org.springframework.web.servlet.view.BeanNameViewResolver" > -->
+<!-- 		            <property name="order"> -->
+<!-- 						<value>1</value> -->
+<!-- 					</property> -->
+<!-- 	            </bean> -->
+<!-- 	            <bean class="org.springframework.web.servlet.view.InternalResourceViewResolver"> -->
+<!-- 	                <property name="prefix" value="/WEB-INF/view/" /> -->
+<!-- 	                <property name="suffix" value=".jsp" /> -->
+<!-- 	                <property name="cache" value="false" /> -->
+<!-- 	                <property name="order"> -->
+<!-- 						<value>0</value> -->
+<!-- 					</property> -->
+<!-- 	            </bean> -->
+<!-- 	        </list> -->
+<!-- 	    </property> -->
+<!-- 	    <property name="defaultViews"> -->
+<!-- 	        <list> -->
+<!-- 	            <bean class="org.springframework.web.servlet.view.json.MappingJacksonJsonView"> -->
+<!-- 	            </bean> -->
+<!-- 	        </list> -->
+<!-- 	    </property> -->
+<!-- 	</bean> -->
+	
+	<util:properties id="globalProperty" location="classpath:global.properties"/>
+
+</beans>

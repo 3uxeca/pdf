@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="js/jquery-3.3.1.min.js"></script>
+    <script src="js/jquery-ui.min.js"></script>   
+    <script src="js/common.js"></script> 
+    <script src="js/color-hash.js"></script>
+    <script src="js/fabric.min.js"></script>
+    <title>CCTV TEST</title>
+</head>
+<body>
+    <canvas></canvas>
+    <script>
+        var canvas = new fabric.Canvas("canvas",{
+            width: 800,
+            height: 600,
+            selection : false,
+            uniScaleTransform : true,
+        });
+
+        fabric.Image.fromURL('images/cctv.png', function(img){
+            var img1 = img.scale(0.1).set({ left: 100, top: 100 });
+            canvas.add(new fabric.Group([ img1 ], {left: 200, top: 200 }))
+        });
+        canvas.clear().renderAll();
+    </script>
+</body>
+</html>
